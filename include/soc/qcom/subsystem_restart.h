@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2015, 2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -18,13 +18,19 @@
 #include <linux/interrupt.h>
 
 struct subsys_device;
-extern struct bus_type subsys_bus_type;
 
 enum {
 	RESET_SOC = 0,
 	RESET_SUBSYS_COUPLED,
 	RESET_LEVEL_MAX
 };
+
+#if defined(CONFIG_HTC_FEATURES_SSR)
+enum {
+	DISABLE_RAMDUMP = 0,
+	ENABLE_RAMDUMP,
+};
+#endif
 
 struct device;
 struct module;
@@ -98,6 +104,15 @@ struct notif_data {
 
 #if defined(CONFIG_MSM_SUBSYSTEM_RESTART)
 
+#if defined(CONFIG_HTC_DEBUG_SSR)
+void subsys_set_restart_reason(struct subsys_device *dev, const char *reason);
+#endif /* CONFIG_HTC_DEBUG_SSR  */
+
+#if defined(CONFIG_HTC_FEATURES_SSR)
+extern void subsys_set_enable_ramdump(struct subsys_device *dev, int enable);
+extern void subsys_set_restart_level(struct subsys_device *dev, int level);
+#endif
+
 extern int subsys_get_restart_level(struct subsys_device *dev);
 extern int subsystem_restart_dev(struct subsys_device *dev);
 extern int subsystem_restart(const char *name);
@@ -116,6 +131,25 @@ extern bool subsys_get_crash_status(struct subsys_device *dev);
 void notify_proxy_vote(struct device *device);
 void notify_proxy_unvote(struct device *device);
 #else
+
+#if defined(CONFIG_HTC_DEBUG_SSR)
+static inline void subsys_set_restart_reason(struct subsys_device *dev, const char *reason)
+{
+	return;
+}
+#endif /* CONFIG_HTC_DEBUG_SSR */
+
+#if defined(CONFIG_HTC_FEATURES_SSR)
+static inline void subsys_set_enable_ramdump(struct subsys_device *dev, int enable)
+{
+	return 0;
+}
+
+static inline void subsys_set_restart_level(struct subsys_device *dev, int level)
+{
+	return 0;
+}
+#endif
 
 static inline int subsys_get_restart_level(struct subsys_device *dev)
 {

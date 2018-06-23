@@ -262,7 +262,7 @@ static int venus_hfi_acquire_regulator(struct regulator_info *rinfo)
 					rinfo->name);
 		}
 	}
-	WARN_ON(!regulator_is_enabled(rinfo->regulator) && (msm_vidc_debug & VIDC_INFO));
+	WARN_ON(!regulator_is_enabled(rinfo->regulator));
 	return rc;
 }
 
@@ -929,12 +929,15 @@ static int venus_hfi_vote_active_buses(void *dev,
 		return -EINVAL;
 	}
 
-        cached_vote_data = device->bus_load.vote_data;
-        if (!cached_vote_data) {
-                dprintk(VIDC_ERR,"Invalid bus load vote data\n");
-                rc = -ENOMEM;
-                goto err_no_mem;
-        }
+	/* (Re-)alloc memory to store the new votes (in case we internally
+	 * re-vote after power collapse, which is transparent to client) */
+	cached_vote_data = krealloc(device->bus_load.vote_data, num_data *
+			sizeof(*cached_vote_data), GFP_KERNEL);
+	if (!cached_vote_data) {
+		dprintk(VIDC_ERR, "Can't alloc memory to cache bus votes\n");
+		rc = -ENOMEM;
+		goto err_no_mem;
+	}
 
 	/* Alloc & init the load table */
 	num_bus = device->res->bus_set.count;
@@ -2342,6 +2345,15 @@ static int venus_hfi_core_init(void *device)
 			goto err_core_init;
 		}
 
+                /* HTC_START: ION debug mechanism enhancement
+                 * Assign the instance in venus_hfi_device struct to smem_client struct
+                 */
+                if (dev->inst == NULL) {
+                        dprintk(VIDC_ERR, "[Vidc_Mem] In %s: Get NULL inst\n", __func__);
+                } else {
+                        dev->hal_client->inst = dev->inst;
+                }
+                /* HTC_END */
 		dprintk(VIDC_DBG, "Dev_Virt: 0x%pa, Reg_Virt: 0x%pK\n",
 			&dev->hal_data->firmware_base,
 			dev->hal_data->register_base);
@@ -3243,6 +3255,13 @@ static void venus_hfi_process_msg_event_notify(
 		HFI_EVENT_SYS_ERROR) {
 
 		venus_hfi_set_state(device, VENUS_STATE_DEINIT);
+               /* Once SYS_ERROR received from HW, it is safe to halt the AXI.
+                * With SYS_ERROR, Venus FW may have crashed and HW might be
+                * active and causing unnecessary transactions. Hence it is
+                * safe to stop all AXI transactions from venus sub-system. */
+               if (venus_hfi_halt_axi(device))
+                       dprintk(VIDC_WARN,
+                               "Failed to halt AXI after SYS_ERROR\n");
 
 		/* Once SYS_ERROR received from HW, it is safe to halt the AXI.
 		 * With SYS_ERROR, Venus FW may have crashed and HW might be
@@ -3743,15 +3762,9 @@ static int venus_hfi_init_bus(struct venus_hfi_device *device)
 		dprintk(VIDC_DBG, "Registered bus client %s\n", name);
 	}
 
-        device->bus_load.vote_data = (struct vidc_bus_vote_data *)
-                                        kzalloc(sizeof(struct vidc_bus_vote_data)*MAX_SUPPORTED_INSTANCES_COUNT, GFP_KERNEL);
+	device->bus_load.vote_data = NULL;
+	device->bus_load.vote_data_count = 0;
 
-        if (device->bus_load.vote_data == NULL) {
-                dprintk(VIDC_ERR,"Failed to allocate memory for vote_data\n");
-                rc = -ENOMEM;
-                goto err_init_bus;
-        }
-        device->bus_load.vote_data_count = 0;
 	return rc;
 err_init_bus:
 	venus_hfi_deinit_bus(device);
@@ -3957,7 +3970,7 @@ static int venus_hfi_disable_regulator(struct regulator_info *rinfo)
 disable_regulator_failed:
 
 	/* Bring attention to this issue */
-	WARN_ON(msm_vidc_debug & VIDC_INFO);
+	WARN_ON(1);
 	return rc;
 }
 
@@ -4034,7 +4047,7 @@ static int venus_hfi_load_fw(void *dev)
 			__func__, device);
 		return -EINVAL;
 	}
-
+	printk("msm_v4l2_vidc venus_fw load start \r\n");
 	trace_msm_v4l2_vidc_fw_load_start("msm_v4l2_vidc venus_fw load start");
 
 	rc = venus_hfi_vote_buses(device, device->bus_load.vote_data,
@@ -4094,6 +4107,7 @@ static int venus_hfi_load_fw(void *dev)
 	}
 
 	trace_msm_v4l2_vidc_fw_load_end("msm_v4l2_vidc venus_fw load end");
+	printk("msm_v4l2_vidc venus_fw load end \r\n");
 	return rc;
 fail_protect_mem:
 	device->power_enabled = false;
@@ -4110,6 +4124,7 @@ fail_enable_gdsc:
 	venus_hfi_unvote_buses(device);
 fail_vote_buses:
 	trace_msm_v4l2_vidc_fw_load_end("msm_v4l2_vidc venus_fw load end");
+	printk("msm_v4l2_vidc venus_fw load end \r\n");
 	return rc;
 }
 
@@ -4148,7 +4163,7 @@ static int venus_hfi_get_fw_info(void *dev, struct hal_fw_info *fw_info)
 	struct venus_hfi_device *device = dev;
 	u32 smem_block_size = 0;
 	u8 *smem_table_ptr;
-	char version[VENUS_VERSION_LENGTH];
+	char version[VENUS_VERSION_LENGTH] = "\0";
 	const u32 version_string_size = VENUS_VERSION_LENGTH;
 	const u32 smem_image_index_venus = 14 * 128;
 

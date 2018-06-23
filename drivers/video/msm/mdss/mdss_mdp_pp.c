@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -22,6 +22,7 @@
 #include <linux/delay.h>
 #include <linux/msm-bus.h>
 #include <linux/msm-bus-board.h>
+#include <linux/msm_mdp.h>
 
 struct mdp_csc_cfg mdp_csc_convert[MDSS_MDP_MAX_CSC] = {
 	[MDSS_MDP_CSC_RGB2RGB] = {
@@ -36,7 +37,20 @@ struct mdp_csc_cfg mdp_csc_convert[MDSS_MDP_MAX_CSC] = {
 		{ 0x0, 0xff, 0x0, 0xff, 0x0, 0xff,},
 		{ 0x0, 0xff, 0x0, 0xff, 0x0, 0xff,},
 	},
-	[MDSS_MDP_CSC_YUV2RGB] = {
+	//YUV2RGB
+	[MDSS_MDP_CSC_YUV2RGB_601_FR] = {
+		0,
+		{
+			0x0200, 0x0000, 0x02cd,
+			0x0200, 0xff50, 0xfe94,
+			0x0200, 0x0388, 0x0000,
+		},
+		{ 0x0, 0xff80, 0xff80,},
+		{ 0x0, 0x0, 0x0,},
+		{ 0x0, 0xff, 0x0, 0xff, 0x0, 0xff,},
+		{ 0x0, 0xff, 0x0, 0xff, 0x0, 0xff,},
+	},
+	[MDSS_MDP_CSC_YUV2RGB_601] = {
 		0,
 		{
 			0x0254, 0x0000, 0x0331,
@@ -48,7 +62,20 @@ struct mdp_csc_cfg mdp_csc_convert[MDSS_MDP_MAX_CSC] = {
 		{ 0x0, 0xff, 0x0, 0xff, 0x0, 0xff,},
 		{ 0x0, 0xff, 0x0, 0xff, 0x0, 0xff,},
 	},
-	[MDSS_MDP_CSC_RGB2YUV] = {
+	//RGB2YUV
+	[MDSS_MDP_CSC_RGB2YUV_601_FR] = {
+		0,
+		{
+			0x0099, 0x012d, 0x0100,
+			0x1fa9, 0x1f57, 0x1f00,
+			0x1f00, 0x1f29, 0x1fd7
+		},
+		{ 0x0, 0x0, 0x0,},
+		{ 0x0000, 0x0080, 0x0080,},
+		{ 0x0, 0xff, 0x0, 0xff, 0x0, 0xff,},
+		{ 0x0000, 0x00ff, 0x0000, 0x00ff, 0x0000, 0x00ff,},
+	},
+	[MDSS_MDP_CSC_RGB2YUV_601] = {
 		0,
 		{
 			0x0083, 0x0102, 0x0032,
@@ -341,7 +368,7 @@ struct mdss_pp_res_type {
 	struct mdp_hist_lut_data enhist_disp_cfg[MDSS_BLOCK_DISP_NUM];
 	struct mdp_dither_cfg_data dither_disp_cfg[MDSS_BLOCK_DISP_NUM];
 	struct mdp_gamut_cfg_data gamut_disp_cfg[MDSS_BLOCK_DISP_NUM];
-	uint16_t gamut_tbl[MDSS_BLOCK_DISP_NUM][3 * GAMUT_TOTAL_TABLE_SIZE];
+	uint16_t gamut_tbl[MDSS_BLOCK_DISP_NUM][GAMUT_TOTAL_TABLE_SIZE];
 	u32 hist_data[MDSS_BLOCK_DISP_NUM][HIST_V_SIZE];
 	struct pp_sts_type pp_disp_sts[MDSS_MAX_MIXER_DISP_NUM];
 	/* physical info */
@@ -888,8 +915,16 @@ static int pp_vig_pipe_setup(struct mdss_mdp_pipe *pipe, u32 *op)
 			 * is a previously configured pipe need to re-configure
 			 * CSC matrix
 			 */
-			mdss_mdp_csc_setup(MDSS_MDP_BLOCK_SSPP, pipe->num,
-					   MDSS_MDP_CSC_YUV2RGB);
+			switch(pipe->color_space) {
+			case MDP_CSC_ITU_R_601_FR:
+				mdss_mdp_csc_setup(MDSS_MDP_BLOCK_SSPP, pipe->num,
+						   MDSS_MDP_CSC_YUV2RGB_601_FR);
+				break;
+			default:
+				mdss_mdp_csc_setup(MDSS_MDP_BLOCK_SSPP, pipe->num,
+						   MDSS_MDP_CSC_YUV2RGB_601);
+				break;
+			}
 		}
 	}
 
@@ -1966,7 +2001,7 @@ int mdss_mdp_pp_resume(struct mdss_mdp_ctl *ctl, u32 dspp_num)
 	struct msm_fb_data_type *bl_mfd;
 
 	if (!ctl || !ctl->mdata || !ctl->mfd) {
-		pr_err("invalid input: ctl = 0x%pK, mdata = 0x%pK, mfd = 0x%pK\n",
+		pr_err("invalid input: ctl = 0x%p, mdata = 0x%p, mfd = 0x%p\n",
 			ctl, (!ctl) ? NULL : ctl->mdata,
 			(!ctl) ? NULL : ctl->mfd);
 		return -EPERM;
@@ -2230,7 +2265,7 @@ static int pp_ad_calc_bl(struct msm_fb_data_type *mfd, int bl_in, int *bl_out,
 	}
 
 	if (!ad->bl_mfd || !ad->bl_mfd->panel_info) {
-		pr_err("Invalid ad info: bl_mfd = 0x%pK, ad->bl_mfd->panel_info = 0x%pK\n",
+		pr_err("Invalid ad info: bl_mfd = 0x%p, ad->bl_mfd->panel_info = 0x%p\n",
 			ad->bl_mfd,
 			(!ad->bl_mfd) ? NULL : ad->bl_mfd->panel_info);
 		mutex_unlock(&ad->lock);
@@ -4691,7 +4726,7 @@ int mdss_mdp_ad_input(struct msm_fb_data_type *mfd,
 			mutex_unlock(&ad->lock);
 			mutex_lock(&mfd->bl_lock);
 			MDSS_BRIGHT_TO_BL(bl, bl, mfd->panel_info->bl_max,
-					mfd->panel_info->brightness_max);
+					MDSS_MAX_BL_BRIGHTNESS);
 			mdss_fb_set_backlight(mfd, bl);
 			mutex_unlock(&mfd->bl_lock);
 			mutex_lock(&ad->lock);
@@ -5597,6 +5632,9 @@ static int is_valid_calib_addr(void *addr, u32 operation)
 	int ret = 0;
 	char __iomem *ptr = addr;
 	char __iomem *mixer_base = mdss_res->mixer_intf->base;
+	char __iomem *rgb_base   = mdss_res->rgb_pipes->base;
+	char __iomem *dma_base   = mdss_res->dma_pipes->base;
+	char __iomem *vig_base   = mdss_res->vig_pipes->base;
 	char __iomem *ctl_base   = mdss_res->ctl_off->base;
 	char __iomem *dspp_base  = mdss_res->mixer_intf->dspp_base;
 
@@ -5628,20 +5666,17 @@ static int is_valid_calib_addr(void *addr, u32 operation)
 			if (ret)
 				goto valid_addr;
 		}
-		if (mdss_res->vig_pipes &&
-		    ptr >= mdss_res->vig_pipes->base) {
+		if (ptr >= vig_base) {
 			ret = is_valid_calib_vig_addr(ptr);
 			if (ret)
 				goto valid_addr;
 		}
-		if (mdss_res->rgb_pipes &&
-		    ptr >= mdss_res->rgb_pipes->base) {
+		if (ptr >= rgb_base) {
 			ret = is_valid_calib_rgb_addr(ptr);
 			if (ret)
 				goto valid_addr;
 		}
-		if (mdss_res->dma_pipes &&
-		    ptr >= mdss_res->dma_pipes->base) {
+		if (ptr >= dma_base) {
 			ret = is_valid_calib_dma_addr(ptr);
 			if (ret)
 				goto valid_addr;

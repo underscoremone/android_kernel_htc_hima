@@ -36,6 +36,10 @@
 #include "clock.h"
 #include "power.h"
 
+// HTC_AUD_START
+#include <soc/qcom/htc_util.h>
+// HTC_AUD_END
+
 #define SUBSTREAM_FLAG_DATA_EP_STARTED	0
 #define SUBSTREAM_FLAG_SYNC_EP_STARTED	1
 
@@ -228,7 +232,7 @@ static int start_endpoints(struct snd_usb_substream *subs, bool can_sleep)
 	if (!test_and_set_bit(SUBSTREAM_FLAG_DATA_EP_STARTED, &subs->flags)) {
 		struct snd_usb_endpoint *ep = subs->data_endpoint;
 
-		snd_printdd(KERN_DEBUG "Starting data EP @%pK\n", ep);
+		snd_printdd(KERN_DEBUG "Starting data EP @%p\n", ep);
 
 		ep->data_subs = subs;
 		err = snd_usb_endpoint_start(ep, can_sleep);
@@ -257,7 +261,7 @@ static int start_endpoints(struct snd_usb_substream *subs, bool can_sleep)
 			}
 		}
 
-		snd_printdd(KERN_DEBUG "Starting sync EP @%pK\n", ep);
+		snd_printdd(KERN_DEBUG "Starting sync EP @%p\n", ep);
 
 		ep->sync_slave = subs->data_endpoint;
 		err = snd_usb_endpoint_start(ep, can_sleep);
@@ -474,12 +478,12 @@ static int match_endpoint_audioformats(struct audioformat *fp,
 	int score = 0;
 
 	if (fp->channels < 1) {
-		snd_printdd("%s: (fmt @%pK) no channels\n", __func__, fp);
+		snd_printdd("%s: (fmt @%p) no channels\n", __func__, fp);
 		return 0;
 	}
 
 	if (!(fp->formats & pcm_format_to_bits(pcm_format))) {
-		snd_printdd("%s: (fmt @%pK) no match for format %d\n", __func__,
+		snd_printdd("%s: (fmt @%p) no match for format %d\n", __func__,
 			fp, pcm_format);
 		return 0;
 	}
@@ -491,7 +495,7 @@ static int match_endpoint_audioformats(struct audioformat *fp,
 		}
 	}
 	if (!score) {
-		snd_printdd("%s: (fmt @%pK) no match for rate %d\n", __func__,
+		snd_printdd("%s: (fmt @%p) no match for rate %d\n", __func__,
 			fp, rate);
 		return 0;
 	}
@@ -499,7 +503,7 @@ static int match_endpoint_audioformats(struct audioformat *fp,
 	if (fp->channels == match->channels)
 		score++;
 
-	snd_printdd("%s: (fmt @%pK) score %d\n", __func__, fp, score);
+	snd_printdd("%s: (fmt @%p) score %d\n", __func__, fp, score);
 
 	return score;
 }
@@ -700,6 +704,12 @@ static int snd_usb_pcm_prepare(struct snd_pcm_substream *substream)
 		goto unlock;
 
 	iface = usb_ifnum_to_if(subs->dev, subs->cur_audiofmt->iface);
+	if (iface == NULL) {
+		snd_printk(KERN_ERR "%s: data interface not found!\n", __func__);
+		ret = -ENODEV;
+		goto unlock;
+	}
+
 	alts = &iface->altsetting[subs->cur_audiofmt->altset_idx];
 	ret = snd_usb_init_sample_rate(subs->stream->chip,
 				       subs->cur_audiofmt->iface,
@@ -1292,9 +1302,11 @@ static void prepare_playback_urb(struct snd_usb_substream *subs,
 	urb->number_of_packets = 0;
 	spin_lock_irqsave(&subs->lock, flags);
 	for (i = 0; i < ctx->packets; i++) {
-		if (ctx->packet_size[i])
-			counts = ctx->packet_size[i];
-		else
+//HTC_AUD_START
+		//if (ctx->packet_size[i])
+		//	counts = ctx->packet_size[i];
+		//else
+//HTC_AUD_END
 			counts = snd_usb_endpoint_next_packet_size(ep);
 
 		/* set up descriptor */
@@ -1438,11 +1450,21 @@ static void retire_playback_urb(struct snd_usb_substream *subs,
 
 static int snd_usb_playback_open(struct snd_pcm_substream *substream)
 {
+	// HTC_AUD_START
+	pr_info("%s htc_disable_partial_pm_log_for_audio: 1\n", __func__);
+	htc_disable_partial_pm_log_for_audio(true);
+	// HTC_AUD_END
+
 	return snd_usb_pcm_open(substream, SNDRV_PCM_STREAM_PLAYBACK);
 }
 
 static int snd_usb_playback_close(struct snd_pcm_substream *substream)
 {
+	// HTC_AUD_START
+	pr_info("%s htc_disable_partial_pm_log_for_audio: 0\n", __func__);
+	htc_disable_partial_pm_log_for_audio(false);
+	// HTC_AUD_END
+
 	return snd_usb_pcm_close(substream, SNDRV_PCM_STREAM_PLAYBACK);
 }
 

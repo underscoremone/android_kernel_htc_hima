@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -344,7 +344,7 @@ int q6asm_enc_cfg_blk_aac(struct audio_client *ac,
 			 uint32_t mode, uint32_t format);
 
 int q6asm_enc_cfg_blk_pcm(struct audio_client *ac,
-			uint32_t rate, uint32_t channels, bool use_back_flavor);
+			uint32_t rate, uint32_t channels);
 
 int q6asm_enc_cfg_blk_pcm_v2(struct audio_client *ac,
 			uint32_t rate, uint32_t channels,
@@ -509,6 +509,16 @@ int q6asm_get_apr_service_id(int session_id);
 */
 int q6asm_media_format_block(struct audio_client *ac, uint32_t format);
 
+//htc audio ++
+/* Enable Q6 Effect Command */
+int q6asm_stream_sample_rate_to_htc_misc_effect(struct audio_client *ac, uint32_t stream_id,
+		uint32_t module_id, uint32_t param_id, uint32_t sample_rate);
+int q6asm_enable_effect(struct audio_client *ac, uint32_t module_id,
+			uint32_t param_id, uint32_t payload_size,
+			void *payload);
+int q6asm_stream_sample_rate_to_geq(struct audio_client *ac, uint32_t stream_id,
+			uint32_t module_id, uint32_t param_id, uint32_t sample_rate);
+//htc audio --
 /* Send the meta data to remove initial and trailing silence */
 int q6asm_send_meta_data(struct audio_client *ac, uint32_t initial_samples,
 		uint32_t trailing_samples);

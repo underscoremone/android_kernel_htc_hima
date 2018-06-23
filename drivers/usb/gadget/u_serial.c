@@ -60,7 +60,9 @@
  * is managed in userspace ... OBEX, PTP, and MTP have been mentioned.
  */
 
-#define PREFIX	"ttyGS"
+/*++ 2014/09/23 USB Team, PCN00010 ++*/
+#define PREFIX	"ttyHSUSB"
+/*-- 2014/09/23 USB Team, PCN00010 --*/
 
 /*
  * gserial is the lifecycle interface, used by USB functions
@@ -870,7 +872,7 @@ static int gs_open(struct tty_struct *tty, struct file *file)
 		spin_lock_irq(&port->port_lock);
 
 		if (status) {
-			pr_debug("gs_open: ttyGS%d (%pK,%pK) no buffer\n",
+			pr_debug("gs_open: ttyGS%d (%p,%p) no buffer\n",
 				port->port_num, tty, file);
 			port->openclose = false;
 			goto exit_unlock_port;
@@ -905,7 +907,7 @@ static int gs_open(struct tty_struct *tty, struct file *file)
 			gser->connect(gser);
 	}
 
-	pr_debug("gs_open: ttyGS%d (%pK,%pK)\n", port->port_num, tty, file);
+	pr_debug("gs_open: ttyGS%d (%p,%p)\n", port->port_num, tty, file);
 
 	status = 0;
 
@@ -941,7 +943,7 @@ static void gs_close(struct tty_struct *tty, struct file *file)
 		goto exit;
 	}
 
-	pr_debug("gs_close: ttyGS%d (%pK,%pK) ...\n", port->port_num, tty, file);
+	pr_debug("gs_close: ttyGS%d (%p,%p) ...\n", port->port_num, tty, file);
 
 	/* mark port as closing but in use; we can drop port lock
 	 * and sleep if necessary
@@ -979,7 +981,7 @@ static void gs_close(struct tty_struct *tty, struct file *file)
 
 	port->openclose = false;
 
-	pr_debug("gs_close: ttyGS%d (%pK,%pK) done!\n",
+	pr_debug("gs_close: ttyGS%d (%p,%p) done!\n",
 			port->port_num, tty, file);
 
 	wake_up(&port->port.close_wait);
@@ -995,7 +997,7 @@ static int gs_write(struct tty_struct *tty, const unsigned char *buf, int count)
 
 	if (!port)
 		return 0;
-	pr_vdebug("gs_write: ttyGS%d (%pK) writing %d bytes\n",
+	pr_vdebug("gs_write: ttyGS%d (%p) writing %d bytes\n",
 			port->port_num, tty, count);
 
 	spin_lock_irqsave(&port->port_lock, flags);
@@ -1017,7 +1019,7 @@ static int gs_put_char(struct tty_struct *tty, unsigned char ch)
 
 	if (!port)
 		return 0;
-	pr_vdebug("gs_put_char: (%d,%pK) char=0x%x, called from %pKf\n",
+	pr_vdebug("gs_put_char: (%d,%p) char=0x%x, called from %pf\n",
 		port->port_num, tty, ch, __builtin_return_address(0));
 
 	spin_lock_irqsave(&port->port_lock, flags);
@@ -1034,7 +1036,7 @@ static void gs_flush_chars(struct tty_struct *tty)
 
 	if (!port)
 		return;
-	pr_vdebug("gs_flush_chars: (%d,%pK)\n", port->port_num, tty);
+	pr_vdebug("gs_flush_chars: (%d,%p)\n", port->port_num, tty);
 
 	spin_lock_irqsave(&port->port_lock, flags);
 	if (port->port_usb)
@@ -1055,7 +1057,7 @@ static int gs_write_room(struct tty_struct *tty)
 		room = gs_buf_space_avail(&port->port_write_buf);
 	spin_unlock_irqrestore(&port->port_lock, flags);
 
-	pr_vdebug("gs_write_room: (%d,%pK) room=%d\n",
+	pr_vdebug("gs_write_room: (%d,%p) room=%d\n",
 		port->port_num, tty, room);
 
 	return room;
@@ -1073,7 +1075,7 @@ static int gs_chars_in_buffer(struct tty_struct *tty)
 	chars = gs_buf_data_avail(&port->port_write_buf);
 	spin_unlock_irqrestore(&port->port_lock, flags);
 
-	pr_vdebug("gs_chars_in_buffer: (%d,%pK) chars=%d\n",
+	pr_vdebug("gs_chars_in_buffer: (%d,%p) chars=%d\n",
 		port->port_num, tty, chars);
 
 	return chars;
@@ -1640,6 +1642,12 @@ static int userial_init(void)
 			B9600 | CS8 | CREAD | HUPCL | CLOCAL;
 	gs_tty_driver->init_termios.c_ispeed = 9600;
 	gs_tty_driver->init_termios.c_ospeed = 9600;
+
+/*++ 2014/09/23 USB Team, PCN00010 ++*/
+	gs_tty_driver->init_termios.c_lflag = 0;
+	gs_tty_driver->init_termios.c_iflag = 0;
+	gs_tty_driver->init_termios.c_oflag = 0;
+/*-- 2014/09/23 USB Team, PCN00010 --*/
 
 	tty_set_operations(gs_tty_driver, &gs_tty_ops);
 	for (i = 0; i < MAX_U_SERIAL_PORTS; i++)

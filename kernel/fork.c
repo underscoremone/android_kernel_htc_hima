@@ -721,7 +721,8 @@ struct mm_struct *mm_access(struct task_struct *task, unsigned int mode)
 
 	mm = get_task_mm(task);
 	if (mm && mm != current->mm &&
-			!ptrace_may_access(task, mode)) {
+			!ptrace_may_access(task, mode) &&
+			!capable(CAP_SYS_RESOURCE)) {
 		mmput(mm);
 		mm = ERR_PTR(-EACCES);
 	}
@@ -1362,7 +1363,10 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 #endif
 
 #ifdef CONFIG_DEBUG_MUTEXES
-	p->blocked_on = NULL; /* not blocked yet */
+	/* not blocked yet */
+	p->blocked_on = NULL;
+	p->blocked_by = NULL;
+	p->blocked_since = 0;
 #endif
 #ifdef CONFIG_MEMCG
 	p->memcg_batch.do_batch = 0;

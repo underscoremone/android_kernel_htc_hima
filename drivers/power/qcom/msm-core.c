@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2015,2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -234,6 +234,7 @@ void trigger_cpu_pwr_stats_calc(void)
 
 		if (cpu_node->temp == prev_temp[cpu])
 			sensor_get_temp(cpu_node->sensor_id, &cpu_node->temp);
+
 		prev_temp[cpu] = cpu_node->temp;
 
 		/*
@@ -290,6 +291,7 @@ static void update_related_freq_table(struct cpufreq_policy *policy)
 	}
 }
 
+extern int pnpmgr_cpu_temp_notify(int cpu, int temp);
 static __ref int do_sampling(void *data)
 {
 	int cpu;
@@ -311,6 +313,7 @@ static __ref int do_sampling(void *data)
 			if (prev_temp[cpu] != cpu_node->temp) {
 				prev_temp[cpu] = cpu_node->temp;
 				set_threshold(cpu_node);
+				pnpmgr_cpu_temp_notify(cpu, prev_temp[cpu]);
 				trace_temp_threshold(cpu, cpu_node->temp,
 					cpu_node->hi_threshold.temp,
 					cpu_node->low_threshold.temp);
@@ -358,14 +361,10 @@ static int update_userspace_power(struct sched_params __user *argp)
 	int cpu;
 	struct cpu_activity_info *node;
 	struct cpu_static_info *sp, *clear_sp;
-	int cpumask, cluster, mpidr;
+	int mpidr = (argp->cluster << 8);
+	int cpumask = argp->cpumask;
 
-	get_user(cpumask, &argp->cpumask);
-	get_user(cluster, &argp->cluster);
-	mpidr = cluster << 8;
-
-	pr_debug("%s: cpumask %d, cluster: %d\n", __func__, cpumask,
-					cluster);
+	pr_debug("cpumask %d, cluster: %d\n", argp->cpumask, argp->cluster);
 	for (i = 0; i < MAX_CORES_PER_CLUSTER; i++, cpumask >>= 1) {
 		if (!(cpumask & 0x01))
 			continue;
@@ -388,10 +387,9 @@ static int update_userspace_power(struct sched_params __user *argp)
 	if (!sp)
 		return -ENOMEM;
 
-	mutex_lock(&policy_update_mutex);
+
 	sp->power = allocate_2d_array_uint32_t(node->sp->num_of_freqs);
 	if (IS_ERR_OR_NULL(sp->power)) {
-		mutex_unlock(&policy_update_mutex);
 		ret = PTR_ERR(sp->power);
 		kfree(sp);
 		return ret;
@@ -411,11 +409,11 @@ static int update_userspace_power(struct sched_params __user *argp)
 	 * argp->cpumask within the cluster (argp->cluster)
 	 */
 	spin_lock(&update_lock);
-	get_user(cpumask, &argp->cpumask);
+	cpumask = argp->cpumask;
 	for (i = 0; i < MAX_CORES_PER_CLUSTER; i++, cpumask >>= 1) {
 		if (!(cpumask & 0x01))
 			continue;
-		mpidr = (cluster << CLUSTER_OFFSET_FOR_MPIDR);
+		mpidr = (argp->cluster << CLUSTER_OFFSET_FOR_MPIDR);
 		mpidr |= i;
 		for_each_possible_cpu(cpu) {
 			if (!(cpu_logical_map(cpu) == mpidr))
@@ -437,13 +435,11 @@ static int update_userspace_power(struct sched_params __user *argp)
 		}
 	}
 	spin_unlock(&update_lock);
-	mutex_unlock(&policy_update_mutex);
 
 	activate_power_table = true;
 	return 0;
 
 failed:
-	mutex_unlock(&policy_update_mutex);
 	for (i = 0; i < TEMP_DATA_POINTS; i++)
 		kfree(sp->power[i]);
 	kfree(sp->power);
@@ -459,15 +455,14 @@ static long msm_core_ioctl(struct file *file, unsigned int cmd,
 	struct sched_params __user *argp = (struct sched_params __user *)arg;
 	int i, cpu = num_possible_cpus();
 	int mpidr;
-	int cluster, cpumask;
+	int cpumask;
 
 	if (!argp)
 		return -EINVAL;
 
-	get_user(cluster, &argp->cluster);
-	mpidr = (cluster << (MAX_CORES_PER_CLUSTER *
+	mpidr = (argp->cluster << (MAX_CORES_PER_CLUSTER *
 			MAX_NUM_OF_CLUSTERS));
-	get_user(cpumask, &argp->cpumask);
+	cpumask = argp->cpumask;
 
 	switch (cmd) {
 	case EA_LEAKAGE:

@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2015, 2017 The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -212,11 +212,9 @@ static ssize_t hdmi_edid_sysfs_wta_res_info(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
 	int rc, page_id;
-	u32 i = 0, j, page;
 	ssize_t ret = strnlen(buf, PAGE_SIZE);
 	struct hdmi_edid_ctrl *edid_ctrl =
 		hdmi_get_featuredata_from_sysfs_dev(dev, HDMI_TX_FEAT_EDID);
-	struct msm_hdmi_mode_timing_info info = {0};
 
 	if (!edid_ctrl) {
 		DEV_ERR("%s: invalid input\n", __func__);
@@ -229,22 +227,7 @@ static ssize_t hdmi_edid_sysfs_wta_res_info(struct device *dev,
 		return rc;
 	}
 
-	if (page_id > MSM_HDMI_INIT_RES_PAGE) {
-		page = MSM_HDMI_INIT_RES_PAGE;
-		while (page < page_id) {
-			j = 1;
-			while (sizeof(info) * j < PAGE_SIZE) {
-				i++;
-				j++;
-			}
-			page++;
-		}
-	}
-
-	if (i < HDMI_VFRMT_MAX)
-		edid_ctrl->page_id = page_id;
-	else
-		DEV_ERR("%s: invalid page id\n", __func__);
+	edid_ctrl->page_id = page_id;
 
 	DEV_DBG("%s: %d\n", __func__, edid_ctrl->page_id);
 	return ret;
@@ -1419,7 +1402,7 @@ loop_end:
 }
 
 static void hdmi_edid_get_display_mode(struct hdmi_edid_ctrl *edid_ctrl,
-	const u8 *data_buf, u32 num_of_cea_blocks)
+	const u8 *data_buf, u32 num_of_cea_blocks, u8 write_burst_vic)
 {
 	u8 i = 0, offset = 0, std_blk = 0;
 	u32 video_format = HDMI_VFRMT_640x480p60_4_3;
@@ -1463,7 +1446,18 @@ static void hdmi_edid_get_display_mode(struct hdmi_edid_ctrl *edid_ctrl,
 			 * while the Video identification code is 1 based in the
 			 * CEA_861D spec
 			 */
-			video_format = (*svd & 0x7F);
+			if (((*svd >= 65) && (*svd <= 127)) || ((*svd >= 193) && (*svd <= 255)))
+			{
+				switch(*svd) {
+					case 93: video_format = HDMI_VFRMT_3840x2160p24_16_9; break;
+					case 94: video_format = HDMI_VFRMT_3840x2160p25_16_9; break;
+					case 95: video_format = HDMI_VFRMT_3840x2160p30_16_9; break;
+					default: break;
+				}
+			}
+			else
+				video_format = (*svd & 0x7F);
+
 			hdmi_edid_add_sink_video_format(edid_ctrl,
 				video_format);
 			/* Make a note of the preferred video format */
@@ -1675,9 +1669,23 @@ static void hdmi_edid_get_display_mode(struct hdmi_edid_ctrl *edid_ctrl,
 	if (!has480p)
 		hdmi_edid_add_sink_video_format(edid_ctrl,
 			HDMI_VFRMT_640x480p60_4_3);
+
+	pr_err("write_burst_vic: %d\n", write_burst_vic);
+	switch (write_burst_vic)
+	{
+		case 0x5d:
+			hdmi_edid_add_sink_video_format(edid_ctrl, HDMI_VFRMT_3840x2160p24_16_9);
+			break;
+		case 0x5e:
+			hdmi_edid_add_sink_video_format(edid_ctrl, HDMI_VFRMT_3840x2160p25_16_9);
+			break;
+		case 0x5f:
+			hdmi_edid_add_sink_video_format(edid_ctrl, HDMI_VFRMT_3840x2160p30_16_9);
+			break;
+	}
 } /* hdmi_edid_get_display_mode */
 
-int hdmi_edid_read(void *input)
+int hdmi_edid_read(void *input, u8 write_burst_vic)
 {
 	/* EDID_BLOCK_SIZE[0x80] Each page size in the EDID ROM */
 	u8 *edid_buf = NULL;
@@ -1800,7 +1808,7 @@ int hdmi_edid_read(void *input)
 		num_of_cea_blocks, cea_extension_ver, vendor_id, ieee_reg_id,
 		edid_buf[0x80]);
 
-	hdmi_edid_get_display_mode(edid_ctrl, edid_buf, num_of_cea_blocks);
+	hdmi_edid_get_display_mode(edid_ctrl, edid_buf, num_of_cea_blocks, write_burst_vic);
 
 	return 0;
 

@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2014,2016 The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -104,7 +104,17 @@ static struct ion_heap_desc ion_heap_meta[] = {
 	{
 		.id	= ION_ADSP_HEAP_ID,
 		.name	= ION_ADSP_HEAP_NAME,
-	}
+	},
+	{
+		.id	= ION_FBMEM_1_HEAP_ID,
+		.type	= ION_HEAP_TYPE_CARVEOUT,
+		.name	= ION_FBMEM_1_HEAP_NAME,
+	},
+        {
+                .id     = ION_FBMEM_2_HEAP_ID,
+                .type   = ION_HEAP_TYPE_CARVEOUT,
+                .name   = ION_FBMEM_2_HEAP_NAME,
+        }
 };
 #endif
 
@@ -125,13 +135,19 @@ struct ion_client *msm_ion_client_create(const char *name)
 	 * The assumption is that if there is a NULL device, the ion
 	 * driver has not yet probed.
 	 */
+	struct ion_client *client;
 	if (idev == NULL)
 		return ERR_PTR(-EPROBE_DEFER);
 
 	if (IS_ERR(idev))
 		return (struct ion_client *)idev;
 
-	return ion_client_create(idev, name);
+	client = ion_client_create(idev, name);
+
+	if (client)
+		ion_client_set_debug_name(client, name);
+
+	return client;
 }
 EXPORT_SYMBOL(msm_ion_client_create);
 
@@ -141,6 +157,43 @@ int msm_ion_do_cache_op(struct ion_client *client, struct ion_handle *handle,
 	return ion_do_cache_op(client, handle, vaddr, 0, len, cmd);
 }
 EXPORT_SYMBOL(msm_ion_do_cache_op);
+
+static atomic_t ion_alloc_mem_usages[ION_USAGE_MAX]
+			= {[0 ... ION_USAGE_MAX-1] = ATOMIC_INIT(0)};
+
+static inline atomic_t* ion_get_meminfo(const enum ion_heap_mem_usage usage)
+{
+	return (usage < ION_USAGE_MAX) ?
+			&ion_alloc_mem_usages[usage] : NULL;
+}
+
+void ion_alloc_inc_usage(const enum ion_heap_mem_usage usage,
+			 const size_t size)
+{
+	atomic_t * const ion_alloc_usage = ion_get_meminfo(usage);
+
+	if (ion_alloc_usage)
+		atomic_add(size, ion_alloc_usage);
+}
+EXPORT_SYMBOL(ion_alloc_inc_usage);
+
+void ion_alloc_dec_usage(const enum ion_heap_mem_usage usage,
+			 const size_t size)
+{
+	atomic_t * const ion_alloc_usage = ion_get_meminfo(usage);
+
+	if (ion_alloc_usage)
+		atomic_sub(size, ion_alloc_usage);
+}
+EXPORT_SYMBOL(ion_alloc_dec_usage);
+
+uintptr_t msm_ion_heap_meminfo(const bool is_total)
+{
+	atomic_t * const ion_alloc_usage = ion_get_meminfo(
+						is_total? ION_TOTAL : ION_IN_USE);
+	return ion_alloc_usage? atomic_read(ion_alloc_usage) * PAGE_SIZE : 0;
+}
+EXPORT_SYMBOL(msm_ion_heap_meminfo);
 
 static int ion_no_pages_cache_ops(struct ion_client *client,
 			struct ion_handle *handle,
@@ -714,7 +767,7 @@ long msm_ion_custom_ioctl(struct ion_client *client,
 		} else {
 			handle = ion_import_dma_buf(client, data.flush_data.fd);
 			if (IS_ERR(handle)) {
-				pr_info("%s: Could not import handle: %pK\n",
+				pr_info("%s: Could not import handle: %p\n",
 					__func__, handle);
 				return -EINVAL;
 			}
@@ -727,8 +780,8 @@ long msm_ion_custom_ioctl(struct ion_client *client,
 			+ data.flush_data.length;
 
 		if (start && check_vaddr_bounds(start, end)) {
-			pr_err("%s: virtual address %pK is out of bounds\n",
-			       __func__, data.flush_data.vaddr);
+			pr_err("%s: virtual address %p is out of bounds\n",
+				__func__, data.flush_data.vaddr);
 			ret = -EINVAL;
 		} else {
 			ret = ion_do_cache_op(
@@ -746,31 +799,40 @@ long msm_ion_custom_ioctl(struct ion_client *client,
 	}
 	case ION_IOC_PREFETCH:
 	{
-		int ret;
-
-		ret = ion_walk_heaps(client, data.prefetch_data.heap_id,
-			ION_HEAP_TYPE_SECURE_DMA,
+		ion_walk_heaps(client, data.prefetch_data.heap_id,
 			(void *)data.prefetch_data.len,
 			ion_secure_cma_prefetch);
-
-		if (ret)
-			return ret;
 		break;
 	}
 	case ION_IOC_DRAIN:
 	{
-		int ret;
-
-		ret = ion_walk_heaps(client, data.prefetch_data.heap_id,
-			ION_HEAP_TYPE_SECURE_DMA,
+		ion_walk_heaps(client, data.prefetch_data.heap_id,
 			(void *)data.prefetch_data.len,
 			ion_secure_cma_drain_pool);
-
-		if (ret)
-			return ret;
 		break;
 	}
+	case ION_IOC_CLIENT_DEBUG_NAME:
+	{
+		struct ion_client_name_data data;
+		int name_len;
+		const size_t ION_CLIENT_DEBUG_NAME_LENGTH = 64;
+		char debug_name[ION_CLIENT_DEBUG_NAME_LENGTH + 1];
 
+		if (copy_from_user(&data, (void __user *)arg,
+					sizeof(struct ion_client_name_data)))
+			return -EFAULT;
+		if (data.len <= 0)
+			return -EFAULT;
+
+		name_len = min(ION_CLIENT_DEBUG_NAME_LENGTH, data.len);
+		if (copy_from_user(debug_name, (void __user *)data.name, name_len))
+			return -EFAULT;
+
+		debug_name[name_len] = '\0';
+
+		return ion_client_set_debug_name(
+				client, debug_name);
+	}
 	default:
 		return -ENOTTY;
 	}

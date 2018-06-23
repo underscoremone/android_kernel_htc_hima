@@ -250,20 +250,12 @@ static int msm_eeprom_config(struct msm_eeprom_ctrl_t *e_ctrl,
 	struct msm_eeprom_cfg_data *cdata =
 		(struct msm_eeprom_cfg_data *)argp;
 	int rc = 0;
-	size_t length = 0;
 
 	CDBG("%s E\n", __func__);
 	switch (cdata->cfgtype) {
 	case CFG_EEPROM_GET_INFO:
 		CDBG("%s E CFG_EEPROM_GET_INFO\n", __func__);
 		cdata->is_supported = e_ctrl->is_supported;
-		length = strlen(e_ctrl->eboard_info->eeprom_name) + 1;
-		if (length > MAX_EEPROM_NAME) {
-			pr_err("%s:%d invalid eeprom name length %d\n",
-				__func__, __LINE__, (int)length);
-			rc = -EINVAL;
-			break;
-		}
 		memcpy(cdata->cfg.eeprom_name,
 			e_ctrl->eboard_info->eeprom_name,
 			sizeof(cdata->cfg.eeprom_name));
@@ -900,21 +892,12 @@ static int msm_eeprom_config32(struct msm_eeprom_ctrl_t *e_ctrl,
 {
 	struct msm_eeprom_cfg_data *cdata = (struct msm_eeprom_cfg_data *)argp;
 	int rc = 0;
-	size_t length = 0;
 
 	CDBG("%s E\n", __func__);
 	switch (cdata->cfgtype) {
 	case CFG_EEPROM_GET_INFO:
 		CDBG("%s E CFG_EEPROM_GET_INFO\n", __func__);
 		cdata->is_supported = e_ctrl->is_supported;
-		length = strlen(e_ctrl->eboard_info->eeprom_name) + 1;
-		if (length > MAX_EEPROM_NAME) {
-			pr_err("%s:%d invalid eeprom name length %d\n",
-				__func__, __LINE__, (int)length);
-			rc = -EINVAL;
-			break;
-		}
-
 		memcpy(cdata->cfg.eeprom_name,
 			e_ctrl->eboard_info->eeprom_name,
 			sizeof(cdata->cfg.eeprom_name));
@@ -1169,6 +1152,15 @@ static int msm_eeprom_i2c_probe(struct i2c_client *client,
 		pr_err("%s:%d kzalloc failed\n", __func__, __LINE__);
 		return -ENOMEM;
 	}
+
+        //HTC_START Check of_node vaild earlier for klockwork issue
+	e_ctrl->is_supported = 0;
+	if (!client->dev.of_node) {
+		pr_err("%s dev.of_node NULL\n", __func__);
+		return -EINVAL;
+	}
+        //HTC_END
+
 	e_ctrl->eeprom_v4l2_subdev_ops = &msm_eeprom_subdev_ops;
 	e_ctrl->eeprom_mutex = &msm_eeprom_mutex;
 	e_ctrl->eboard_info = kzalloc(sizeof(
@@ -1178,11 +1170,13 @@ static int msm_eeprom_i2c_probe(struct i2c_client *client,
 		rc = -ENOMEM;
 		goto ectrl_free;
 	}
+ #if 0   //HTC_START Already check of_node
 	e_ctrl->is_supported = 0;
 	if (!client->dev.of_node) {
 		pr_err("%s dev.of_node NULL\n", __func__);
 		return -EINVAL;
 	}
+#endif    //HTC_END
 
 	rc = of_property_read_u32(client->dev.of_node, "cell-index",
 		&e_ctrl->subdev_id);

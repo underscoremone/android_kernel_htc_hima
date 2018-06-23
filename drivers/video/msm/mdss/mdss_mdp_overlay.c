@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -35,6 +35,7 @@
 #include "mdss_fb.h"
 #include "mdss_mdp.h"
 #include "mdss_mdp_rotator.h"
+#include "mdss_htc_util.h"
 
 #define VSYNC_PERIOD 16
 #define BORDERFILL_NDX	0x0BF000BF
@@ -905,6 +906,8 @@ int mdss_mdp_overlay_pipe_setup(struct msm_fb_data_type *mfd,
 		pipe->overfetch_disable = 0;
 	}
 	pipe->bg_color = req->bg_color;
+
+	pipe->color_space = req->color_space;
 
 	if (pipe->type == MDSS_MDP_PIPE_TYPE_CURSOR)
 		goto cursor_done;
@@ -3524,10 +3527,6 @@ static int mdss_mdp_hw_cursor_update(struct msm_fb_data_type *mfd,
 
 	if (cursor->set & FB_CUR_SETIMAGE) {
 		u32 cursor_addr;
-		if (img->width * img->height * 4 > cursor_frame_size) {
-			pr_err("cursor image size is too large\n");
-			return -EINVAL;
-		}
 		ret = copy_from_user(mfd->cursor_buf, img->data,
 				     img->width * img->height * 4);
 		if (ret) {
@@ -3717,6 +3716,9 @@ static int mdss_mdp_pp_ioctl(struct msm_fb_data_type *mfd,
 		break;
 
 	case mdp_op_pcc_cfg:
+		/* HTC: display calibration for RGB*/
+		htc_update_rgb_cali_data(mfd, &mdp_pp.data.pcc_cfg_data);
+
 		ret = mdss_mdp_pcc_config(&mdp_pp.data.pcc_cfg_data,
 					&copyback);
 		break;
@@ -3958,16 +3960,12 @@ static int mdss_fb_get_metadata(struct msm_fb_data_type *mfd,
 		ret = mdss_fb_get_hw_caps(mfd, &metadata->data.caps);
 		break;
 	case metadata_op_get_ion_fd:
-		if (mfd->fb_ion_handle && mfd->fb_ion_client) {
-			get_dma_buf(mfd->fbmem_buf);
+		if (mfd->fb_ion_handle) {
 			metadata->data.fbmem_ionfd =
-				ion_share_dma_buf_fd(mfd->fb_ion_client,
-					mfd->fb_ion_handle);
-			if (metadata->data.fbmem_ionfd < 0) {
-				dma_buf_put(mfd->fbmem_buf);
+				dma_buf_fd(mfd->fbmem_buf, 0);
+			if (metadata->data.fbmem_ionfd < 0)
 				pr_err("fd allocation failed. fd = %d\n",
 						metadata->data.fbmem_ionfd);
-			}
 		}
 		break;
 	case metadata_op_crc:

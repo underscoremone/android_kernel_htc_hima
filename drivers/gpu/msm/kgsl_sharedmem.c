@@ -1,4 +1,4 @@
-/* Copyright (c) 2002,2007-2017. The Linux Foundation. All rights reserved.
+/* Copyright (c) 2002,2007-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -17,6 +17,7 @@
 #include <linux/slab.h>
 #include <linux/kmemleak.h>
 #include <linux/highmem.h>
+#include <linux/msm_kgsl.h>
 #include <soc/qcom/scm.h>
 
 #include "kgsl.h"
@@ -282,6 +283,14 @@ static ssize_t kgsl_drv_full_cache_threshold_show(struct device *dev,
 			kgsl_driver.full_cache_threshold);
 }
 
+static ssize_t kgsl_alloc_show(struct device *dev,
+					struct device_attribute *attr,
+					char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%d\n",
+			kgsl_get_alloc_size(true));
+}
+
 static DEVICE_ATTR(vmalloc, 0444, kgsl_drv_memstat_show, NULL);
 static DEVICE_ATTR(vmalloc_max, 0444, kgsl_drv_memstat_show, NULL);
 static DEVICE_ATTR(page_alloc, 0444, kgsl_drv_memstat_show, NULL);
@@ -295,6 +304,7 @@ static DEVICE_ATTR(mapped_max, 0444, kgsl_drv_memstat_show, NULL);
 static DEVICE_ATTR(full_cache_threshold, 0644,
 		kgsl_drv_full_cache_threshold_show,
 		kgsl_drv_full_cache_threshold_store);
+static DEVICE_ATTR(kgsl_alloc, 0444, kgsl_alloc_show, NULL);
 
 static const struct device_attribute *drv_attr_list[] = {
 	&dev_attr_vmalloc,
@@ -308,6 +318,7 @@ static const struct device_attribute *drv_attr_list[] = {
 	&dev_attr_mapped,
 	&dev_attr_mapped_max,
 	&dev_attr_full_cache_threshold,
+	&dev_attr_kgsl_alloc,
 	NULL
 };
 
@@ -379,6 +390,7 @@ static void kgsl_page_alloc_free(struct kgsl_memdesc *memdesc)
 	int i = 0;
 	struct scatterlist *sg;
 	int sglen = memdesc->sglen;
+	struct kgsl_process_private *priv = memdesc->private;
 
 	kgsl_driver.stats.page_alloc -= memdesc->size;
 
@@ -398,6 +410,9 @@ static void kgsl_page_alloc_free(struct kgsl_memdesc *memdesc)
 			__free_pages(p, compound_order(p));
 		}
 	}
+
+	if (priv)
+		kgsl_process_sub_stats(priv, KGSL_MEM_ENTRY_PAGE_ALLOC, memdesc->size);
 }
 
 /*
@@ -506,144 +521,49 @@ static inline unsigned int _fixup_cache_range_op(unsigned int op)
 }
 #endif
 
-static int kgsl_do_cache_op(struct page *page, void *addr,
-		uint64_t offset, uint64_t size, unsigned int op)
-{
-	void (*cache_op)(const void *, const void *);
-
-	/*
-	 * The dmac_xxx_range functions handle addresses and sizes that
-	 * are not aligned to the cacheline size correctly.
-	 */
-	switch (_fixup_cache_range_op(op)) {
-	case KGSL_CACHE_OP_FLUSH:
-		cache_op = dmac_flush_range;
-		break;
-	case KGSL_CACHE_OP_CLEAN:
-		cache_op = dmac_clean_range;
-		break;
-	case KGSL_CACHE_OP_INV:
-		cache_op = dmac_inv_range;
-		break;
-	default:
-		return -EINVAL;
-	}
-
-	if (page != NULL) {
-		unsigned long pfn = page_to_pfn(page) + offset / PAGE_SIZE;
-		/*
-		 *  page_address() returns the kernel virtual address of page.
-		 *  For high memory kernel virtual address exists only if page
-		 *  has been mapped. So use a version of kmap rather than
-		 *  page_address() for high memory.
-		 */
-		if (PageHighMem(page)) {
-			offset &= ~PAGE_MASK;
-
-			do {
-				unsigned int len = size;
-
-				if (len + offset > PAGE_SIZE)
-					len = PAGE_SIZE - offset;
-
-				page = pfn_to_page(pfn++);
-				addr = kmap_atomic(page);
-				cache_op(addr + offset, addr + offset + len);
-				kunmap_atomic(addr);
-
-				size -= len;
-				offset = 0;
-			} while (size);
-
-			return 0;
-		}
-
-		addr = page_address(page);
-	}
-
-	cache_op(addr + offset, addr + offset + (size_t) size);
-	return 0;
-}
-
 int kgsl_cache_range_op(struct kgsl_memdesc *memdesc, size_t offset,
-		size_t size, unsigned int op)
+			size_t size, unsigned int op)
 {
-	void *addr = NULL;
-	struct sg_table *sgt = NULL;
-	struct scatterlist *sg = NULL;
-	unsigned int i = 0, pos = 0;
-	int ret = 0;
+	/*
+	 * If the buffer is mapped in the kernel operate on that address
+	 * otherwise use the user address
+	 */
 
-	if (size == 0 || size > UINT_MAX)
+	void *addr = (memdesc->hostptr) ?
+		memdesc->hostptr : (void *) memdesc->useraddr;
+
+	/* Make sure that size is non-zero */
+	if (!size)
 		return -EINVAL;
-
-	/* Make sure that the offset + size does not overflow */
-	if ((offset + size < offset) || (offset + size < size))
-		return -ERANGE;
 
 	/* Check that offset+length does not exceed memdesc->size */
 	if ((offset + size) > memdesc->size)
 		return -ERANGE;
 
-	if (memdesc->hostptr) {
-		addr = memdesc->hostptr;
-		/* Make sure the offset + size do not overflow the address */
-		if (addr + ((size_t) offset + (size_t) size) < addr)
-			return -ERANGE;
+	/* Return quietly if the buffer isn't mapped on the CPU */
+	if (addr == NULL)
+		return 0;
 
-		ret = kgsl_do_cache_op(NULL, addr, offset, size, op);
-		return ret;
-	}
+	addr = addr + offset;
 
 	/*
-	 * If the buffer is not to mapped to kernel, perform cache
-	 * operations after mapping to kernel.
+	 * The dmac_xxx_range functions handle addresses and sizes that
+	 * are not aligned to the cacheline size correctly.
 	 */
-	if (memdesc->sg) {
-		for_each_sg(memdesc->sg, sg, memdesc->sglen, i) {
-			uint64_t sg_offset, sg_left;
-			if (offset >= (pos + sg->length)) {
-				pos += sg->length;
-				continue;
-			}
-			sg_offset = offset > pos ? offset - pos : 0;
-			sg_left = (sg->length - sg_offset > size) ? size :
-				                sg->length - sg_offset;
-			ret = kgsl_do_cache_op(sg_page(sg), NULL, sg_offset,
-				                                sg_left, op);
-			size -= sg_left;
-	                if (size == 0)
-		                break;
-			pos += sg->length;
-		}
-	} else {
-		if (memdesc->pages == NULL)
-			return ret;
 
-		sgt = kgsl_alloc_sgt_from_pages(memdesc);
-		if (IS_ERR(sgt))
-			return PTR_ERR(sgt);
-
-		for_each_sg(sgt->sgl, sg, sgt->nents, i) {
-			uint64_t sg_offset, sg_left;
-
-			if (offset >= (pos + sg->length)) {
-				pos += sg->length;
-				continue;
-			}
-			sg_offset = offset > pos ? offset - pos : 0;
-			sg_left = (sg->length - sg_offset > size) ? size :
-						sg->length - sg_offset;
-			ret = kgsl_do_cache_op(sg_page(sg), NULL, sg_offset,
-								sg_left, op);
-			size -= sg_left;
-			if (size == 0)
-				break;
-			pos += sg->length;
-		}
-		kgsl_free_sgt(sgt);
+	switch (_fixup_cache_range_op(op)) {
+	case KGSL_CACHE_OP_FLUSH:
+		dmac_flush_range(addr, addr + size);
+		break;
+	case KGSL_CACHE_OP_CLEAN:
+		dmac_clean_range(addr, addr + size);
+		break;
+	case KGSL_CACHE_OP_INV:
+		dmac_inv_range(addr, addr + size);
+		break;
 	}
-	return ret;
+
+	return 0;
 }
 EXPORT_SYMBOL(kgsl_cache_range_op);
 
@@ -825,11 +745,18 @@ kgsl_sharedmem_page_alloc_user(struct kgsl_memdesc *memdesc,
 			    struct kgsl_pagetable *pagetable,
 			    size_t size)
 {
+	int ret = 0;
+	struct kgsl_process_private *priv = memdesc->private;
+
 	size = PAGE_ALIGN(size);
 	if (size == 0)
 		return -EINVAL;
 
-	return _kgsl_sharedmem_page_alloc(memdesc, pagetable, size);
+	ret = _kgsl_sharedmem_page_alloc(memdesc, pagetable, size);
+
+	if (!ret && priv)
+		kgsl_process_add_stats(priv, KGSL_MEM_ENTRY_PAGE_ALLOC, size);
+	return ret;
 }
 EXPORT_SYMBOL(kgsl_sharedmem_page_alloc_user);
 

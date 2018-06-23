@@ -365,7 +365,7 @@ interrupt_exit:
 	return;
 }
 
-static int lmh_sensor_read(struct thermal_zone_device *dev, unsigned long *val)
+static int lmh_sensor_read(struct thermal_zone_device *dev, long *val)
 {
 	int ret = 0;
 	struct lmh_mon_sensor_data *lmh_sensor;
@@ -450,7 +450,7 @@ static int lmh_activate_trip(struct thermal_zone_device *dev,
 }
 
 static int lmh_get_trip_value(struct thermal_zone_device *dev,
-		int trip, unsigned long *value)
+		int trip, long *value)
 {
 	struct lmh_mon_sensor_data *lmh_sensor;
 
@@ -882,8 +882,7 @@ static int lmh_mon_init_driver(void)
 {
 	int ret = 0;
 
-	lmh_mon_data = kzalloc(sizeof(struct lmh_mon_driver_data),
-				GFP_KERNEL);
+	lmh_mon_data = kzalloc(sizeof(lmh_mon_data), GFP_KERNEL);
 	if (!lmh_mon_data) {
 		pr_err("No memory\n");
 		return -ENOMEM;

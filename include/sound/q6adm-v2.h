@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -34,6 +34,7 @@ enum {
 	ADM_AUDVOL_CAL,
 	ADM_RTAC_INFO_CAL,
 	ADM_RTAC_APR_CAL,
+	ADM_DTS_EAGLE,
 	ADM_SRS_TRUMEDIA,
 	ADM_MAX_CAL_TYPES
 };
@@ -132,6 +133,10 @@ int adm_wait_timeout(int port_id, int copp_idx, int wait_time);
 int adm_store_cal_data(int port_id, int copp_idx, int path, int perf_mode,
 		       int cal_type, char *params, int *size);
 
+//htc audio ++
+int q6adm_enable_effect(u16 port_id, int copp_idx, uint32_t copp_id, uint32_t param_id,
+		uint32_t payload_size, void *payload);
+//htc audio --
 int adm_send_compressed_device_mute(int port_id, int copp_idx, bool mute_on);
 
 int adm_send_compressed_device_latency(int port_id, int copp_idx, int latency);

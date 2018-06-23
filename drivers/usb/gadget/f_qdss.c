@@ -609,7 +609,7 @@ static void qdss_disable(struct usb_function *f)
 static int qdss_dpl_ipa_connect(int port_num)
 {
 	int ret;
-	u8 dst_connection_idx;
+	int dst_connection_idx;
 	struct f_qdss *qdss;
 	struct gqdss *g_qdss;
 	struct gadget_ipa_port *gp;
@@ -639,7 +639,7 @@ static int qdss_dpl_ipa_connect(int port_num)
 		return ret;
 	}
 
-	ret = ipa_data_connect(gp, port_num, 0, dst_connection_idx);
+	ret = ipa_data_connect(gp, port_num, 0, (u8)dst_connection_idx);
 	if (ret) {
 		pr_err("ipa_data_connect failed: err:%d\n", ret);
 		return ret;
@@ -661,7 +661,7 @@ static void usb_qdss_connect_work(struct work_struct *work)
 	dxport = qdss_ports[qdss->port_num].data_xport;
 	ctrl_xport = qdss_ports[qdss->port_num].ctrl_xport;
 	port_num = qdss_ports[qdss->port_num].data_xport_num;
-	pr_debug("%s: data xport: %s dev: %pK portno: %d\n",
+	pr_debug("%s: data xport: %s dev: %p portno: %d\n",
 			__func__, xport_to_str(dxport),
 			qdss, qdss->port_num);
 	if (qdss->port_num >= nr_qdss_ports) {
@@ -766,7 +766,7 @@ static int qdss_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 
 	dxport = qdss_ports[qdss->port_num].data_xport;
 
-	pr_debug("qdss_set_alt qdss pointer = %pK\n", qdss);
+	pr_debug("qdss_set_alt qdss pointer = %p\n", qdss);
 
 	if (alt != 0)
 		goto fail;
