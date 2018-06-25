@@ -3226,7 +3226,6 @@ static int sd_blk_issue_rw_rq(struct mmc_queue *mq, struct request *rqc)
 		case MMC_BLK_RETRY:
 			if (retry++ < 2)
 				break;
-		case MMC_BLK_CMD_ERR:
 		case MMC_BLK_ECC_ERR:
 		case MMC_BLK_DATA_ERR:
 		case MMC_BLK_ABORT: {
@@ -3293,9 +3292,9 @@ static int sd_blk_issue_rw_rq(struct mmc_queue *mq, struct request *rqc)
 					blk_rq_cur_bytes(req));
 	}
 
-#if 0
+
  start_new_req:
-#endif
+
 	if (rqc) {
 		if (mmc_card_removed(card)) {
 			rqc->cmd_flags |= REQ_QUIET;
